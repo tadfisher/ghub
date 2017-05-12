@@ -111,6 +111,7 @@
 (defvar ghub-base-url "https://api.github.com")
 (defvar ghub-authenticate t)
 (defvar ghub-token nil)
+(defvar ghub-package nil)
 (defvar ghub-username nil)
 (defvar ghub-unpaginate nil)
 
@@ -238,7 +239,10 @@ by `ghub--username' and a host based on `ghub-base-url'.  When
              (plist-get
               (car (auth-source-search
                     :max 1
-                    :user (ghub--username)
+                    :user (let ((key (ghub--username)))
+                            (if ghub-package
+                                (concat key ":" ghub-package)
+                              key))
                     :host (save-match-data
                             (string-match "\\`https?://" ghub-base-url)
                             (substring ghub-base-url (match-end 0)))))
