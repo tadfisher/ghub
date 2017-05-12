@@ -114,6 +114,7 @@
 (defvar ghub-package nil)
 (defvar ghub-username nil)
 (defvar ghub-unpaginate nil)
+(defvar ghub-create-token nil)
 
 (defun ghub-get (resource &optional params data noerror)
   "Make `GET' request for RESOURCE, optionally sending PARAMS and/or DATA.
@@ -250,6 +251,10 @@ by `ghub--username' and a host based on `ghub-base-url'.  When
         (or (if (functionp secret)
                 (funcall secret)
               secret)
+            (and ghub-create-token
+                 (ghub-create-token ghub-package
+                                    (completing-read-multiple
+                                     "Token scopes: " ghub--token-scopes)))
             (signal 'ghub-auth-error "Token not found")))))
 
 (defun ghub--username ()
@@ -283,6 +288,88 @@ underscores.  E.g. `gh_example_com.user' for gh.example.com/api."
                   (format "Github is taking to long to create %s" resource)))
         (message "Waiting for %s (%ss)..." resource total)
         (sit-for for)))))
+
+(defconst ghub--token-scopes
+  '((user             . "")
+    (user:email       . "")
+    (user:follow      . "")
+    (public_repo      . "")
+    (repo             . "")
+    (repo_deployment  . "")
+    (repo:status      . "")
+    (delete_repo      . "")
+    (notifications    . "")
+    (gist             . "")
+    (read:repo_hook   . "")
+    (write:repo_hook  . "")
+    (admin:repo_hook  . "")
+    (read:org         . "")
+    (write:org        . "")
+    (admin:org        . "")
+    (read:public_key  . "")
+    (write:public_key . "")
+    (admin:public_key . "")
+    (read:gpg_key     . "")
+    (write:gpg_key    . "")
+    (admin:gpg_key    . "")))
+
+(defun ghub-create-token (package scopes &optional note)
+  "Create and save a new token for PACKAGE with access to SCOPES.
+If PACKAGE is nil, then create a token that can be shared by
+multiple Emacs packages.  Optional NOTE specifies a note saved
+for the token; if it is nil, then \"Emacs package PACKAGE\" is
+used."
+  (interactive
+   (let ((pkg (read-string
+               "Create new token for package (default: generic token): ")))
+     (when (equal pkg "")
+       (setq pkg nil))
+     (list pkg
+           (completing-read-multiple "Token scopes: " ghub--token-scopes)
+           (read-string "Token description: "
+                        (if pkg
+                            (concat "Emacs package " pkg)
+                          "Emacs library ghub.el")))))
+  (let* ((ghub-authenticate 'basic)
+         (token
+          (cdr (assq 'token
+                     (ghub-post
+                      "/authorizations" nil
+                      `((scopes . ,scopes)
+                        (note . ,(or note
+                                     (if package
+                                         (concat "Emacs package " package)
+                                       "Emacs library ghub.el"))))))))
+         (file (convert-standard-filename "~/.authinfo.gpg")))
+    ;; TODO Read the documentation and then do this properly.
+    ;;
+    ;; There is a relevant TODO in `auth-source.el': "allow creating
+    ;; and changing netrc lines (not files) e.g. change a password".
+    ;; Until this has been implemented, use this hack.
+    (with-current-buffer (find-file-noselect file)
+      (goto-char (point-max))
+      (insert (format "machine api.github.com login %s password %s\n"
+                      (concat (ghub--username)
+                              (and ghub-package (concat ":" ghub-package)))
+                      token))
+      (save-buffer)
+      (kill-buffer))
+    ;; FIXME Only forget our own invalid secret, which appears to be
+    ;; "this information is not available".
+    (auth-source-forget-all-cached)
+    token))
+
+'(progn
+   (let ()
+     (ghub-get "/repos/tarsius/ghub"))
+   (let ((ghub-create-token t))
+     (ghub-get "/repos/tarsius/ghub"))
+   (let ((ghub-package "foobar"))
+     (ghub-get "/repos/tarsius/ghub"))
+   (let ((ghub-package "foobar")
+         (ghub-create-token t))
+     (ghub-get "/repos/tarsius/ghub"))
+   )
 
 ;;; ghub.el ends soon
 (provide 'ghub)
